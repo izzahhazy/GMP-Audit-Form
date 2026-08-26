@@ -649,6 +649,10 @@ async function switchToPeriod(periodKey){
   state = await loadPeriod(periodKey);
   activeTab = "week1";
   renderApp();
+  // Keep the "Select month" input in sync with the period we actually
+  // switched to (only done here, not on every render — see renderRecords).
+  const periodInp = document.getElementById('periodPicker');
+  if(periodInp) periodInp.value = activePeriod;
   // Pull the latest version from Google Sheets automatically, so switching
   // to a period always shows the shared record rather than a stale local
   // copy (or nothing, if this device never had local storage for it).
@@ -1254,7 +1258,13 @@ function renderAll(){
 // ------------------------------------------------------- records panel ---
 function renderRecords(){
   const periodInp = document.getElementById('periodPicker');
-  if(periodInp && document.activeElement !== periodInp) periodInp.value = activePeriod;
+  // NOTE: this used to reset periodInp.value = activePeriod on every
+  // render (guarded only by "not currently focused"), which could stomp
+  // on a month the user had just picked but not yet submitted — e.g. an
+  // unrelated debounced auto-save firing a re-render right as they clicked
+  // "Show records" would silently revert their selection back to the old
+  // month. The value is now only synced from switchToPeriod() itself.
+  if(periodInp && !periodInp.value) periodInp.value = activePeriod;
 
   const chips = document.getElementById('periodChips');
   if(chips){
@@ -1434,18 +1444,32 @@ function saveRawData(ss, periodLabel, json) {
     try { sheet.hideSheet(); } catch (e) {}
     sheet.getRange(1, 1, 1, 3).setValues([["periodLabel", "json", "updatedAt"]]);
   }
+  // Force column A to plain text — otherwise Sheets silently auto-converts
+  // a value like "August 2026" into an actual Date, which then never
+  // string-matches the plain "August 2026" a GET request compares against.
+  sheet.getRange("A:A").setNumberFormat("@");
   var values = sheet.getDataRange().getValues();
   var foundRow = -1;
   for (var i = 1; i < values.length; i++) {
-    if (values[i][0] === periodLabel) { foundRow = i + 1; break; }
+    if (normalizePeriodCell_(values[i][0]) === periodLabel) { foundRow = i + 1; break; }
   }
   var now = new Date().toISOString();
   if (foundRow > 0) {
+    sheet.getRange(foundRow, 1).setValue(periodLabel);
     sheet.getRange(foundRow, 2).setValue(json);
     sheet.getRange(foundRow, 3).setValue(now);
   } else {
     sheet.appendRow([periodLabel, json, now]);
   }
+}
+
+// Handles rows that were already corrupted into a Date value before the
+// plain-text fix above existed, so old synced data still loads correctly.
+function normalizePeriodCell_(v) {
+  if (Object.prototype.toString.call(v) === "[object Date]") {
+    return Utilities.formatDate(v, Session.getScriptTimeZone(), "MMMM yyyy");
+  }
+  return String(v);
 }
 
 // GET ?period=<periodLabel> — lets the form load back whatever was last
@@ -1462,7 +1486,7 @@ function doGet(e) {
     if (sheet) {
       var values = sheet.getDataRange().getValues();
       for (var i = 1; i < values.length; i++) {
-        if (values[i][0] === period) {
+        if (normalizePeriodCell_(values[i][0]) === period) {
           return ContentService.createTextOutput(JSON.stringify({ status: "ok", data: JSON.parse(values[i][1]) }))
             .setMimeType(ContentService.MimeType.JSON);
         }
@@ -1938,8 +1962,9 @@ document.getElementById('deleteBtn').addEventListener('click', doDelete);
 document.getElementById('printBtn').addEventListener('click', ()=>{ window.print(); });
 
 document.getElementById('showRecordsBtn').addEventListener('click', ()=>{
-  const val = document.getElementById('periodPicker').value;
-  if(val) switchToPeriod(val); else renderRecords();
+  const periodInp = document.getElementById('periodPicker');
+  const val = periodInp ? periodInp.value : "";
+  if(val){ periodInp.blur(); switchToPeriod(val); } else renderRecords();
 });
 document.getElementById('printAllBtn').addEventListener('click', printAllRecords);
 
