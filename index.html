@@ -1647,10 +1647,13 @@ function writeRecordBlock(sheet, startRow, data, rec) {
   r += 1;
   ["name", "position", "date"].forEach(function (f) {
     var lbl = f.charAt(0).toUpperCase() + f.slice(1) + ":";
-    sheet.getRange(r, 1).setValue(lbl).setFontWeight("bold");
+    // Wrap + smaller font so labels like "Position:" fit inside the
+    // narrow 32-34px label columns instead of getting visually cut off.
+    sheet.getRange(r, 1).setValue(lbl).setFontWeight("bold").setWrap(true).setFontSize(8.5);
     sheet.getRange(r, 2, 1, 3).merge().setValue(rec.signLeft[f] || "");
-    sheet.getRange(r, 5).setValue(lbl).setFontWeight("bold");
+    sheet.getRange(r, 5).setValue(lbl).setFontWeight("bold").setWrap(true).setFontSize(8.5);
     sheet.getRange(r, 6, 1, 2).merge().setValue(rec.signRight[f] || "");
+    sheet.setRowHeight(r, 24);
     r += 1;
   });
   gridBorder(sheet.getRange(sigStart, 1, r - sigStart, COLS));
