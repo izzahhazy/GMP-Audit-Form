@@ -1510,17 +1510,21 @@ function writeRecordBlock(sheet, startRow, data, rec) {
   var hdrStart = r;
 
   sheet.getRange(r, 1, 2, 4).merge().setValue(data.company).setFontWeight("bold").setFontSize(12);
-  sheet.getRange(r, 5).setValue("Form No.:").setFontWeight("bold");
+  sheet.getRange(r, 5).setValue("Form No.:").setFontWeight("bold").setWrap(true).setFontSize(8.5);
   sheet.getRange(r, 6, 1, 2).merge().setValue(data.formNo);
-  sheet.getRange(r + 1, 5).setValue("Issue No.:").setFontWeight("bold");
+  sheet.getRange(r + 1, 5).setValue("Issue No.:").setFontWeight("bold").setWrap(true).setFontSize(8.5);
   sheet.getRange(r + 1, 6, 1, 2).merge().setValue(data.issueNo);
+  sheet.setRowHeight(r, 24);
+  sheet.setRowHeight(r + 1, 24);
   r += 2;
 
   sheet.getRange(r, 1, 2, 4).merge().setValue(data.formTitle).setFontWeight("bold").setFontSize(12);
-  sheet.getRange(r, 5).setValue("Issue Date:").setFontWeight("bold");
+  sheet.getRange(r, 5).setValue("Issue Date:").setFontWeight("bold").setWrap(true).setFontSize(8.5);
   sheet.getRange(r, 6, 1, 2).merge().setValue(data.issueDate);
-  sheet.getRange(r + 1, 5).setValue("Record:").setFontWeight("bold");
+  sheet.getRange(r + 1, 5).setValue("Record:").setFontWeight("bold").setWrap(true).setFontSize(8.5);
   sheet.getRange(r + 1, 6, 1, 2).merge().setValue(rec.label);
+  sheet.setRowHeight(r, 24);
+  sheet.setRowHeight(r + 1, 24);
   r += 2;
   gridBorder(sheet.getRange(hdrStart, 1, r - hdrStart, COLS));
   r += 1;
@@ -1647,14 +1651,14 @@ function writeSectionTable(sheet, startRow, section) {
   var itemsStart = r;
   section.items.forEach(function (item) {
     sheet.getRange(r, 1).setValue(item.no);
-    sheet.getRange(r, 2).setValue(item.criteria);
+    sheet.getRange(r, 2).setValue(item.criteria).setWrap(true).setVerticalAlignment("top");
     [0, 1, 2].forEach(function (v, i) {
       if (item.mark === v) {
         sheet.getRange(r, 3 + i).setValue(v).setFontWeight("bold").setBackground("#e4ede2");
       }
     });
-    sheet.getRange(r, 6).setValue(item.when || "");
-    sheet.getRange(r, 7).setValue(item.person || "");
+    sheet.getRange(r, 6).setValue(item.when || "").setWrap(true);
+    sheet.getRange(r, 7).setValue(item.person || "").setWrap(true);
     r += 1;
   });
   gridBorder(sheet.getRange(itemsStart, 1, section.items.length, 7));
