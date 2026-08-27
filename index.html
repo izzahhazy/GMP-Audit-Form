@@ -1612,22 +1612,33 @@ function writeRecordBlock(sheet, startRow, data, rec) {
   r += 1;
 
   var commentsStart = r;
+  // Full-width label row, then a full-width blank/merged text row below it
+  // — matching the original paper form's plain comment box with NO
+  // vertical divider (previously the label sat in its own narrow column
+  // next to the text, and gridBorder() drew an unwanted vertical line
+  // between them for the full height of the box).
   if (rec.comments1 !== undefined) {
-    sheet.getRange(r, 1).setValue("Comments (Outside):").setFontWeight("bold");
-    sheet.getRange(r, 2, 1, COLS - 1).merge().setValue(rec.comments1 || "");
+    sheet.getRange(r, 1, 1, COLS).merge().setValue("Comments (Outside):").setFontWeight("bold");
+    r += 1;
+    sheet.getRange(r, 1, 1, COLS).merge().setValue(rec.comments1 || "").setWrap(true).setVerticalAlignment("top");
+    sheet.setRowHeight(r, 60);
     r += 1;
   }
   if (rec.comments2 !== undefined) {
-    sheet.getRange(r, 1).setValue("Comments (Internal):").setFontWeight("bold");
-    sheet.getRange(r, 2, 1, COLS - 1).merge().setValue(rec.comments2 || "");
+    sheet.getRange(r, 1, 1, COLS).merge().setValue("Comments (Internal):").setFontWeight("bold");
+    r += 1;
+    sheet.getRange(r, 1, 1, COLS).merge().setValue(rec.comments2 || "").setWrap(true).setVerticalAlignment("top");
+    sheet.setRowHeight(r, 60);
     r += 1;
   }
   if (rec.comments !== undefined) {
-    sheet.getRange(r, 1).setValue("Comments:").setFontWeight("bold");
-    sheet.getRange(r, 2, 1, COLS - 1).merge().setValue(rec.comments || "");
+    sheet.getRange(r, 1, 1, COLS).merge().setValue("Comments by Auditor(s):").setFontWeight("bold");
+    r += 1;
+    sheet.getRange(r, 1, 1, COLS).merge().setValue(rec.comments || "").setWrap(true).setVerticalAlignment("top");
+    sheet.setRowHeight(r, 60);
     r += 1;
   }
-  if (r > commentsStart) gridBorder(sheet.getRange(commentsStart, 1, r - commentsStart, COLS));
+  if (r > commentsStart) outerBorder(sheet.getRange(commentsStart, 1, r - commentsStart, COLS));
   r += 1;
 
   var sigStart = r;
@@ -1657,6 +1668,12 @@ function writeRecordBlock(sheet, startRow, data, rec) {
 // lines that come from setting borders piecemeal on overlapping ranges.
 function gridBorder(range) {
   range.setBorder(true, true, true, true, true, true, "#000000", SpreadsheetApp.BorderStyle.SOLID);
+}
+// Outer edge only — no internal vertical/horizontal dividers. Used for
+// blank write-in boxes (like Comments) that should look like a single
+// plain box, matching the paper form, rather than a grid of cells.
+function outerBorder(range) {
+  range.setBorder(true, true, true, true, false, false, "#000000", SpreadsheetApp.BorderStyle.SOLID);
 }
 
 // Writes one section (Outside/Internal perimeter) table: same column
