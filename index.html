@@ -346,6 +346,7 @@
     .sheet.hide-hdr-print table.hdr{display:none !important;}
     .record-note, .note{display:none !important;}
     .page-break-before{page-break-before:always;break-before:page;}
+    .print-date-value{display:inline-block !important;flex:1;font-size:12px;font-family:inherit;padding:6px 8px;border-bottom:none;min-width:0;}
   }
   @page{size:A4; margin:10mm;}
 
@@ -362,6 +363,7 @@
     table.audit td, table.audit th{font-size:10.5px;padding:4px;}
     .sectiontab{min-width:100px;font-size:12.5px;padding:10px 6px;}
   }
+  .print-date-value{display:none;} /* only shown during print — see @media print above */
 </style>
 </head>
 <body class="view-fillchecklist">
@@ -1320,6 +1322,40 @@ function copyLink(){
     window.prompt("Copy this link:", url);
   }
 }
+
+// Native <input type="date"> shows a browser-drawn "dd/mm/yyyy" hint when
+// empty, which prints exactly as-is — looking like a computer artifact
+// rather than a blank line on the paper form. Swap each date input for a
+// plain formatted (or blank) text span just for the print, then restore.
+function formatDateDDMMYYYY(iso){
+  if(!iso) return "";
+  const parts = iso.split("-");
+  if(parts.length!==3) return iso;
+  return parts[2] + "/" + parts[1] + "/" + parts[0];
+}
+function prepareDateInputsForPrint(){
+  document.querySelectorAll('input[type="date"]').forEach(inp=>{
+    if(inp.dataset.printSwapped) return;
+    const span = document.createElement('span');
+    span.className = 'print-date-value';
+    span.textContent = formatDateDDMMYYYY(inp.value);
+    inp.insertAdjacentElement('afterend', span);
+    inp.dataset.printSwapped = '1';
+    // display:none removes it from the flex layout cleanly, without the
+    // position:absolute artifacts that were breaking table borders and
+    // pushing the replacement text outside its cell.
+    inp.style.display = 'none';
+  });
+}
+function restoreDateInputsAfterPrint(){
+  document.querySelectorAll('.print-date-value').forEach(span=>span.remove());
+  document.querySelectorAll('input[type="date"][data-print-swapped]').forEach(inp=>{
+    inp.style.display = '';
+    delete inp.dataset.printSwapped;
+  });
+}
+window.addEventListener('beforeprint', prepareDateInputsForPrint);
+window.addEventListener('afterprint', restoreDateInputsAfterPrint);
 
 function printAllRecords(){
   const includeHeader = document.getElementById('includeHeaderChk').checked;
