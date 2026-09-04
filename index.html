@@ -424,10 +424,10 @@
         <strong>Step 2 — connect it here</strong>
         <div class="rc-field" style="margin-top:8px;">
           <label>Apps Script Web app URL</label>
-          <input type="text" id="gsheetUrlInput" placeholder="https://script.google.com/macros/s/XXXX/exec">
+          <input type="text" id="gsheetUrlInput" value="https://script.google.com/macros/s/AKfycbzsxeHmpttz7vlywocx32ncf55Wlaid1fxVSU7R5HjtYaH6DVrqakI94Tfu8c3pZ6qS1g/exec" readonly>
         </div>
         <div class="btns" style="margin-top:8px;">
-          <button class="action secondary" id="saveGsheetUrlBtn">Save URL</button>
+          <button class="action secondary" id="saveGsheetUrlBtn">Update URL</button>
           <button class="action" id="syncNowBtn">Sync this month to Google Sheet</button>
           <button class="action secondary" id="loadFromGsheetBtn">Load this month from Google Sheet</button>
         </div>
@@ -1804,15 +1804,14 @@ function buildGSheetPayload(){
 function safeGet(k){ try{ return localStorage.getItem(k) || ''; }catch(e){ return ''; } }
 function safeSet(k,v){ try{ localStorage.setItem(k,v); }catch(e){} }
 
-let localGsheetUrl = ""; // used only when persistent storage is unavailable
+// Permanent Google Apps Script connection.
+// Every time the GMP Audit Form opens, it uses this URL automatically.
+const DEFAULT_GSHEET_URL = "https://script.google.com/macros/s/AKfycbzsxeHmpttz7vlywocx32ncf55Wlaid1fxVSU7R5HjtYaH6DVrqakI94Tfu8c3pZ6qS1g/exec";
+let localGsheetUrl = DEFAULT_GSHEET_URL;
+
 async function getGsheetUrl(){
-  const local = safeGet(STORE_PREFIX+"gsheet-url");
-  if(local) return local;
-  if(!storageOK) return localGsheetUrl;
-  try{
-    const r = await window.storage.get(STORE_PREFIX+"gsheet-url", true).catch(()=>null);
-    return r && r.value ? r.value : "";
-  }catch(e){ return localGsheetUrl; }
+  // Always prefer the permanently configured deployment URL.
+  return DEFAULT_GSHEET_URL;
 }
 async function saveGsheetUrl(url){
   localGsheetUrl = url;
@@ -2086,7 +2085,7 @@ document.getElementById('resetTemplateBtn').addEventListener('click', ()=>{
   await loadTemplate();
   renderApp();
 
-  const savedGsheetUrl = await getGsheetUrl();
+  const savedGsheetUrl = DEFAULT_GSHEET_URL;
   const ind = document.getElementById('saveIndicator');
   const banner = document.getElementById('storageBanner');
   if(savedGsheetUrl){
