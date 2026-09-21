@@ -1083,7 +1083,7 @@ function renderSummary(){
   <textarea class="comments" data-field="mcomments" ${locked?'disabled':''}>${escapeHtml(state.monthly.comments)}</textarea>
 
   <table class="sig">
-    <tr><th>Reviewed by (QA/GMP Manager):</th><th>Verified by:</th></tr>
+    <tr><th>Audited by:</th><th>Verified by:</th></tr>
     <tr>
       <td class="sig-line">${escapeHtml(state.monthly.reviewed.name)}</td>
       <td class="sig-line">${escapeHtml(state.monthly.verified.name)}</td>
@@ -1776,7 +1776,7 @@ function buildRecordPayload(key){
   if(isMonthly){
     base.period = state.monthly.period;
     base.comments = state.monthly.comments;
-    base.signLeftLabel = "Reviewed by (QA/GMP Manager):";
+    base.signLeftLabel = "Audited by:";
     base.signLeft = state.monthly.reviewed;
     base.signRightLabel = "Verified by:";
     base.signRight = state.monthly.verified;
