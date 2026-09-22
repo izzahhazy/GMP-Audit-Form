@@ -2090,10 +2090,11 @@ function renderTrendResult(periods, items){
   }
   const chart = buildTrendChartSvg(withScores);
   const ratingRows = withScores.map(p=>`<tr><td>${p.period}</td><td>${p.total}</td><td>${p.rating||""}</td></tr>`).join("");
-  const failItems = items.filter(it=>it.total>0).slice(0,8);
+  const failItems = items.filter(it=>it.fails>0).slice(0,15);
+  const zeroFailCount = items.filter(it=>it.total>0 && it.fails===0).length;
   const itemRows = failItems.length ? failItems.map(it=>
     `<tr><td>${it.criteria}</td><td style="text-align:center;">${it.fails}</td><td style="text-align:center;">${Math.round(it.failRate*100)}%</td></tr>`
-  ).join("") : `<tr><td colspan="3">No fails recorded yet.</td></tr>`;
+  ).join("") : `<tr><td colspan="3">No items have been marked 0 in any synced Monthly Summary yet (${zeroFailCount} items checked so far, all comply).</td></tr>`;
 
   box.innerHTML = `
     <h3 style="margin:16px 0 8px;">Total Score by month</h3>
