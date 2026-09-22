@@ -451,7 +451,10 @@
 
   <div id="trendSection" class="panel">
     <div class="gsheet-status" id="trendBanner">📈 Score &amp; finding trend across all months synced to Google Sheet.</div>
-    <div class="btns" style="margin:10px 0;">
+    <div class="btns" style="margin:10px 0;align-items:center;">
+      <label style="font-size:13px;font-weight:600;">Year:
+        <select id="trendYearSelect" style="margin-left:6px;padding:4px 8px;"><option value="">All years</option></select>
+      </label>
       <button class="action secondary" id="refreshTrendBtn">Refresh trend</button>
     </div>
     <div id="trendContent"><p class="gnote">Click "Refresh trend" to load.</p></div>
@@ -1555,9 +1558,10 @@ function normalizePeriodCell_(v) {
 // "Trend Summary" sheet: monthly Total Score + rating per period, and how
 // often each checklist item was marked 0 (fail) across the Monthly Summary
 // of every period that has one saved.
-function computeTrendSummary_(ss) {
+function computeTrendSummary_(ss, yearFilter) {
   var sheet = ss.getSheetByName("_rawdata");
   var periods = [];
+  var years = {};
   var itemStats = {}; // criteria text -> {fails, total}
   var itemOrder = [];
   if (sheet) {
@@ -1565,6 +1569,10 @@ function computeTrendSummary_(ss) {
     for (var i = 1; i < values.length; i++) {
       var periodLabel = normalizePeriodCell_(values[i][0]);
       if (!periodLabel) continue;
+      var yearMatch = periodLabel.match(/\d{4}/);
+      var yr = yearMatch ? yearMatch[0] : "";
+      if (yr) years[yr] = true;
+      if (yearFilter && yr !== String(yearFilter)) continue;
       var data;
       try { data = JSON.parse(values[i][1]); } catch (e2) { continue; }
       var monthly = null;
@@ -1592,7 +1600,8 @@ function computeTrendSummary_(ss) {
     return { criteria: k, fails: s.fails, total: s.total, failRate: s.total ? s.fails / s.total : 0 };
   });
   items.sort(function (a, b) { return b.failRate - a.failRate || b.fails - a.fails; });
-  return { periods: periods, items: items };
+  var yearList = Object.keys(years).sort();
+  return { periods: periods, items: items, years: yearList };
 }
 
 // Rebuilds a visible "Trend Summary" tab every time a sync happens, so
@@ -1631,8 +1640,8 @@ function doGet(e) {
     var trend = e.parameter && e.parameter.trend;
     if (trend) {
       var ssT = SpreadsheetApp.getActiveSpreadsheet();
-      var summaryT = computeTrendSummary_(ssT);
-      return ContentService.createTextOutput(JSON.stringify({ status: "ok", periods: summaryT.periods, items: summaryT.items }))
+      var summaryT = computeTrendSummary_(ssT, e.parameter.year);
+      return ContentService.createTextOutput(JSON.stringify({ status: "ok", periods: summaryT.periods, items: summaryT.items, years: summaryT.years }))
         .setMimeType(ContentService.MimeType.JSON);
     }
     if (!period) {
@@ -2061,21 +2070,34 @@ async function loadFromGoogleSheet(){
 // synced) and renders a simple SVG line chart of Total Score per month plus
 // a ranked list of the checklist items most often marked 0 (fail).
 let trendLoaded = false;
+let trendYearsPopulated = false;
 function renderTrendIfEmpty(){
   if(!trendLoaded) loadTrend();
 }
 async function loadTrend(){
   const box = document.getElementById('trendContent');
   box.innerHTML = "<p class=\"gnote\">Loading trend…</p>";
+  const yearSel = document.getElementById('trendYearSelect');
+  const chosenYear = yearSel.value;
   try{
     const url = await getGsheetUrl();
-    const res = await fetch(url + "?trend=1");
+    const qs = chosenYear ? ("?trend=1&year=" + encodeURIComponent(chosenYear)) : "?trend=1";
+    const res = await fetch(url + qs);
     const parsed = await res.json();
     if(parsed.status !== "ok"){
       box.innerHTML = "<p class=\"gnote\">Could not load trend: " + (parsed.message||"unknown error") + "</p>";
       return;
     }
     trendLoaded = true;
+    if(!trendYearsPopulated && Array.isArray(parsed.years)){
+      trendYearsPopulated = true;
+      parsed.years.forEach(y=>{
+        const opt = document.createElement('option');
+        opt.value = y; opt.textContent = y;
+        yearSel.appendChild(opt);
+      });
+      yearSel.value = chosenYear;
+    }
     renderTrendResult(parsed.periods||[], parsed.items||[]);
   }catch(e){
     box.innerHTML = "<p class=\"gnote\">Trend load failed (" + e.message + "). Check the Google Sheet is connected and at least one month has been synced.</p>";
@@ -2135,7 +2157,8 @@ function buildTrendChartSvg(points){
     ${labels}
   </svg>`;
 }
-document.getElementById('refreshTrendBtn').addEventListener('click', ()=>{ trendLoaded=false; loadTrend(); });
+document.getElementById('refreshTrendBtn').addEventListener('click', ()=>{ loadTrend(); });
+document.getElementById('trendYearSelect').addEventListener('change', ()=>{ loadTrend(); });
 
 // ---------------------------------------------------------------- doVerify etc -
 // Clicking Verify first puts the record into a read-only "reviewing" state
