@@ -333,11 +333,14 @@
     border:1px solid var(--hairline);border-radius:6px;resize:vertical;min-height:44px;
   }
   @media (max-width:700px){ .editform-grid{grid-template-columns:1fr;} }
+  .trend-table{width:100%;border-collapse:collapse;margin-top:8px;font-size:13px;}
+  .trend-table th, .trend-table td{border:1px solid #ddd;padding:6px 8px;text-align:left;}
+  .trend-table th{background:#e7e2d6;}
 
   /* ---------- print ---------- */
   @media print{
     body{background:#fff;}
-    .sectiontabs, .tabbar, .toolbar, .storage-banner, #recordsSection, #gsheetSection, #editformSection{display:none !important;}
+    .sectiontabs, .tabbar, .toolbar, .storage-banner, #recordsSection, #gsheetSection, #editformSection, #trendSection{display:none !important;}
     #app{max-width:none;padding:0;}
     .sheet{display:none !important;border:none;padding:0;}
     .sheet.print-target{display:block !important;}
@@ -354,6 +357,7 @@
     body:not(.view-fillchecklist) #fcTabToolbar{display:none;}
     body:not(.view-fillchecklist) #sheets{display:none;}
     body:not(.view-records) #recordsSection{display:none;}
+    body:not(.view-trend) #trendSection{display:none;}
     body:not(.view-gsheet) #gsheetSection{display:none;}
     body:not(.view-editform) #editformSection{display:none;}
   }
@@ -445,6 +449,14 @@
     <p class="gnote small" style="margin-top:14px;">To load the CSV into Google Sheets manually: open Google Sheets → File → Import → Upload → select the downloaded CSV → "Insert new sheet(s)". The .json backup is for restoring into this form later (Import data) and isn't meant for Sheets directly.</p>
   </div>
 
+  <div id="trendSection" class="panel">
+    <div class="gsheet-status" id="trendBanner">📈 Score &amp; finding trend across all months synced to Google Sheet.</div>
+    <div class="btns" style="margin:10px 0;">
+      <button class="action secondary" id="refreshTrendBtn">Refresh trend</button>
+    </div>
+    <div id="trendContent"><p class="gnote">Click "Refresh trend" to load.</p></div>
+  </div>
+
   <div id="editformSection" class="panel">
     <div class="gsheet-status" id="editformBanner">✏️ Editing the form itself — wording and header info only, not the recorded data.</div>
     <p class="gnote">Change wording here (item text, company/form header info) when the form needs revising — for example a new Issue No. or a clearer instruction. This edits the <strong>template</strong> everyone sees, not any week's recorded answers. Saved the same way as everything else, so it updates for anyone using this link.</p>
@@ -482,6 +494,27 @@
 
 <script>
 (function(){
+
+// Password required to open "Edit Form" (change wording/header). Change this
+// string to whatever management wants the password to be — it's the only
+// place it needs to be edited.
+const EDIT_FORM_PASSWORD = "hexa2026";
+const EDIT_UNLOCK_KEY = "hx3f34_edit_unlocked";
+
+function isEditFormUnlocked(){
+  return sessionStorage.getItem(EDIT_UNLOCK_KEY) === "1";
+}
+
+function unlockEditForm(){
+  const pw = window.prompt("Enter management password to edit the form:");
+  if(pw === null) return false; // cancelled
+  if(pw === EDIT_FORM_PASSWORD){
+    sessionStorage.setItem(EDIT_UNLOCK_KEY, "1");
+    return true;
+  }
+  alert("Wrong password.");
+  return false;
+}
 
 const COMPANY_DEFAULT = "HEXA FOOD SDN BHD (HEXA 3)";
 const FORM_TITLE_DEFAULT = "GMP AUDIT FORM";
@@ -895,7 +928,7 @@ function renderWeekTable(weekKey, weekNo){
       <td class="company" rowspan="2">${template.formTitle}</td>
       <td class="label">Issue Date:</td><td class="value">${template.issueDate}</td>
     </tr>
-    <tr><td class="label">Page:</td><td class="value">1 of 4</td></tr>
+    <tr><td class="label">Page:</td><td class="value">1 of 3</td></tr>
   </table>
 
   ${bannerHtml}
@@ -1032,7 +1065,7 @@ function renderSummary(){
       <td class="company" rowspan="2">${template.formTitle}</td>
       <td class="label">Issue Date:</td><td class="value">${template.issueDate}</td>
     </tr>
-    <tr><td class="label">Page:</td><td class="value">1 of 4</td></tr>
+    <tr><td class="label">Page:</td><td class="value">1 of 3</td></tr>
   </table>
 
   ${bannerHtml}
@@ -1120,8 +1153,9 @@ let activeTab = "week1";
 const SECTIONS = [
   {key:"fillchecklist", label:"Fill checklist"},
   {key:"records", label:"Records / Print"},
+  {key:"trend", label:"Trend"},
   {key:"gsheet", label:"Google Sheet"},
-  {key:"editform", label:"Edit Form"}
+  {key:"editform", label:"Edit Form 🔒"}
 ];
 let activeSection = "fillchecklist";
 
@@ -1133,7 +1167,14 @@ function renderSectionTabs(){
   const bar = document.getElementById('sectionTabs');
   bar.innerHTML = SECTIONS.map(s=>`<button class="sectiontab ${activeSection===s.key?'active':''}" data-sec="${s.key}">${s.label}</button>`).join("");
   bar.querySelectorAll('.sectiontab').forEach(btn=>{
-    btn.addEventListener('click', ()=>{ activeSection = btn.dataset.sec; renderApp(); });
+    btn.addEventListener('click', ()=>{
+      const sec = btn.dataset.sec;
+      if(sec === "editform" && !isEditFormUnlocked()){
+        if(!unlockEditForm()) return; // wrong password / cancelled: stay put
+      }
+      activeSection = sec;
+      renderApp();
+    });
   });
 }
 
@@ -1461,6 +1502,7 @@ const APPS_SCRIPT_SOURCE = `function doPost(e) {
     sheet.setColumnWidth(7, 110);
 
     saveRawData(ss, data.periodLabel, JSON.stringify(data));
+    rebuildTrendSummarySheet_(ss);
 
     return ContentService.createTextOutput(JSON.stringify({ status: "ok", sheet: sheetName }))
       .setMimeType(ContentService.MimeType.JSON);
@@ -1508,11 +1550,91 @@ function normalizePeriodCell_(v) {
   return String(v);
 }
 
+// Scans every saved period in _rawdata and builds the trend data shared by
+// the ?trend=1 GET endpoint (used by the app's "Trend" tab) and the visible
+// "Trend Summary" sheet: monthly Total Score + rating per period, and how
+// often each checklist item was marked 0 (fail) across the Monthly Summary
+// of every period that has one saved.
+function computeTrendSummary_(ss) {
+  var sheet = ss.getSheetByName("_rawdata");
+  var periods = [];
+  var itemStats = {}; // criteria text -> {fails, total}
+  var itemOrder = [];
+  if (sheet) {
+    var values = sheet.getDataRange().getValues();
+    for (var i = 1; i < values.length; i++) {
+      var periodLabel = normalizePeriodCell_(values[i][0]);
+      if (!periodLabel) continue;
+      var data;
+      try { data = JSON.parse(values[i][1]); } catch (e2) { continue; }
+      var monthly = null;
+      (data.records || []).forEach(function (rec) { if (rec.key === "monthly") monthly = rec; });
+      var total = (monthly && monthly.total !== "") ? monthly.total : "";
+      var rating = monthly ? monthly.ratingLabel : "";
+      periods.push({ period: periodLabel, total: total, rating: rating });
+      if (monthly) {
+        monthly.sections.forEach(function (sec) {
+          sec.items.forEach(function (it) {
+            var key = it.criteria;
+            if (!itemStats[key]) { itemStats[key] = { fails: 0, total: 0 }; itemOrder.push(key); }
+            if (it.mark === 0 || it.mark === 1 || it.mark === 2) {
+              itemStats[key].total += 1;
+              if (it.mark === 0) itemStats[key].fails += 1;
+            }
+          });
+        });
+      }
+    }
+  }
+  periods.sort(function (a, b) { return new Date("1 " + a.period) - new Date("1 " + b.period); });
+  var items = itemOrder.map(function (k) {
+    var s = itemStats[k];
+    return { criteria: k, fails: s.fails, total: s.total, failRate: s.total ? s.fails / s.total : 0 };
+  });
+  items.sort(function (a, b) { return b.failRate - a.failRate || b.fails - a.fails; });
+  return { periods: periods, items: items };
+}
+
+// Rebuilds a visible "Trend Summary" tab every time a sync happens, so
+// management can see the same score/finding trend directly in the sheet,
+// not just in the app's Trend tab.
+function rebuildTrendSummarySheet_(ss) {
+  var summary = computeTrendSummary_(ss);
+  var sheet = ss.getSheetByName("Trend Summary");
+  if (sheet) { sheet.clear(); sheet.clearFormats(); } else { sheet = ss.insertSheet("Trend Summary"); }
+
+  sheet.getRange(1, 1, 1, 3).setValues([["Period", "Total Score", "Rating"]])
+    .setFontWeight("bold").setBackground("#e7e2d6");
+  var periodRows = summary.periods.map(function (p) { return [p.period, p.total, p.rating]; });
+  if (periodRows.length) sheet.getRange(2, 1, periodRows.length, 3).setValues(periodRows);
+  gridBorder(sheet.getRange(1, 1, periodRows.length + 1, 3));
+
+  var startRow = periodRows.length + 3;
+  sheet.getRange(startRow, 1, 1, 3).setValues([["Item / Criteria", "Times Marked 0 (Fail)", "Fail Rate"]])
+    .setFontWeight("bold").setBackground("#e7e2d6");
+  var itemRows = summary.items.map(function (it) {
+    return [it.criteria, it.fails, it.total ? Math.round(it.failRate * 100) + "%" : ""];
+  });
+  if (itemRows.length) sheet.getRange(startRow + 1, 1, itemRows.length, 3).setValues(itemRows);
+  gridBorder(sheet.getRange(startRow, 1, itemRows.length + 1, 3));
+
+  sheet.setColumnWidth(1, 340);
+  sheet.setColumnWidth(2, 160);
+  sheet.setColumnWidth(3, 100);
+}
+
 // GET ?period=<periodLabel> — lets the form load back whatever was last
 // synced for that month, so closing and reopening the tab doesn't lose it.
 function doGet(e) {
   try {
     var period = e.parameter && e.parameter.period;
+    var trend = e.parameter && e.parameter.trend;
+    if (trend) {
+      var ssT = SpreadsheetApp.getActiveSpreadsheet();
+      var summaryT = computeTrendSummary_(ssT);
+      return ContentService.createTextOutput(JSON.stringify({ status: "ok", periods: summaryT.periods, items: summaryT.items }))
+        .setMimeType(ContentService.MimeType.JSON);
+    }
     if (!period) {
       return ContentService.createTextOutput(JSON.stringify({ status: "ok", message: "GMP Audit sync endpoint is running." }))
         .setMimeType(ContentService.MimeType.JSON);
@@ -1934,7 +2056,87 @@ async function loadFromGoogleSheet(){
   }
 }
 
-// ---------------------------------------------------------- doVerify etc -
+// ---------------------------------------------------------------- Trend --
+// Loads ?trend=1 from the Apps Script (aggregated across every period ever
+// synced) and renders a simple SVG line chart of Total Score per month plus
+// a ranked list of the checklist items most often marked 0 (fail).
+let trendLoaded = false;
+function renderTrendIfEmpty(){
+  if(!trendLoaded) loadTrend();
+}
+async function loadTrend(){
+  const box = document.getElementById('trendContent');
+  box.innerHTML = "<p class=\"gnote\">Loading trend…</p>";
+  try{
+    const url = await getGsheetUrl();
+    const res = await fetch(url + "?trend=1");
+    const parsed = await res.json();
+    if(parsed.status !== "ok"){
+      box.innerHTML = "<p class=\"gnote\">Could not load trend: " + (parsed.message||"unknown error") + "</p>";
+      return;
+    }
+    trendLoaded = true;
+    renderTrendResult(parsed.periods||[], parsed.items||[]);
+  }catch(e){
+    box.innerHTML = "<p class=\"gnote\">Trend load failed (" + e.message + "). Check the Google Sheet is connected and at least one month has been synced.</p>";
+  }
+}
+function renderTrendResult(periods, items){
+  const box = document.getElementById('trendContent');
+  const withScores = periods.filter(p=>p.total!=="" && p.total!=null);
+  if(withScores.length===0){
+    box.innerHTML = "<p class=\"gnote\">No Monthly Summary has been saved &amp; synced yet for any month, so there's no score trend to show. Fill and save a Monthly Summary, sync to Google Sheet, then refresh.</p>";
+    return;
+  }
+  const chart = buildTrendChartSvg(withScores);
+  const ratingRows = withScores.map(p=>`<tr><td>${p.period}</td><td>${p.total}</td><td>${p.rating||""}</td></tr>`).join("");
+  const failItems = items.filter(it=>it.total>0).slice(0,8);
+  const itemRows = failItems.length ? failItems.map(it=>
+    `<tr><td>${it.criteria}</td><td style="text-align:center;">${it.fails}</td><td style="text-align:center;">${Math.round(it.failRate*100)}%</td></tr>`
+  ).join("") : `<tr><td colspan="3">No fails recorded yet.</td></tr>`;
+
+  box.innerHTML = `
+    <h3 style="margin:16px 0 8px;">Total Score by month</h3>
+    ${chart}
+    <table class="trend-table">
+      <tr><th>Period</th><th>Total Score</th><th>Rating</th></tr>
+      ${ratingRows}
+    </table>
+    <h3 style="margin:22px 0 8px;">Items most often marked 0 (fail)</h3>
+    <table class="trend-table">
+      <tr><th>Checking criteria</th><th>Times failed</th><th>Fail rate</th></tr>
+      ${itemRows}
+    </table>
+  `;
+}
+function buildTrendChartSvg(points){
+  const W = 640, H = 220, padL = 36, padR = 16, padT = 16, padB = 30;
+  const maxScore = 72; // matches the form's rating scale (0-72)
+  const n = points.length;
+  const stepX = n>1 ? (W-padL-padR)/(n-1) : 0;
+  const xy = points.map((p,i)=>{
+    const x = padL + stepX*i;
+    const y = padT + (1 - (Number(p.total)||0)/maxScore) * (H-padT-padB);
+    return [x,y];
+  });
+  const linePts = xy.map(p=>p[0]+","+p[1]).join(" ");
+  const dots = xy.map((p,i)=>`<circle cx="${p[0]}" cy="${p[1]}" r="3.5" fill="#3f5747"></circle>`).join("");
+  const labels = points.map((p,i)=>`<text x="${xy[i][0]}" y="${H-8}" font-size="9" text-anchor="middle" fill="#555">${p.period.split(" ")[0].slice(0,3)}</text>`).join("");
+  const gridY = [0,0.25,0.5,0.75,1].map(f=>{
+    const y = padT + f*(H-padT-padB);
+    const val = Math.round(maxScore*(1-f));
+    return `<line x1="${padL}" y1="${y}" x2="${W-padR}" y2="${y}" stroke="#e3e3e3"></line><text x="4" y="${y+3}" font-size="9" fill="#888">${val}</text>`;
+  }).join("");
+  return `<svg viewBox="0 0 ${W} ${H}" style="width:100%;max-width:${W}px;height:auto;background:#fff;border:1px solid #e0e0e0;border-radius:6px;">
+    ${gridY}
+    <polyline points="${linePts}" fill="none" stroke="#3f5747" stroke-width="2"></polyline>
+    ${dots}
+    ${labels}
+  </svg>`;
+}
+document.getElementById('refreshTrendBtn').addEventListener('click', ()=>{ trendLoaded=false; loadTrend(); });
+
+// ---------------------------------------------------------------- doVerify etc -
 // Clicking Verify first puts the record into a read-only "reviewing" state
 // (no changes possible) so QA can check the report before committing —
 // only "Confirm Verify" inside that banner actually locks it as Verified.
@@ -1985,6 +2187,7 @@ function renderApp(){
   document.body.className = "view-" + activeSection;
   if(activeSection==="fillchecklist") renderAll();
   else if(activeSection==="records") renderRecords();
+  else if(activeSection==="trend") renderTrendIfEmpty();
   else if(activeSection==="editform") renderEditForm();
   // gsheet section is static; nothing to render dynamically
 }
