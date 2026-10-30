@@ -248,6 +248,14 @@
   .wc-title{font-weight:700;font-size:12px;color:var(--accent);margin-bottom:2px;}
   .wc-text{white-space:pre-wrap;line-height:1.45;}
   .wc-empty{color:#8a9288;font-style:italic;}
+  .vmodal-bg{position:fixed;inset:0;background:rgba(0,0,0,.45);display:none;align-items:center;justify-content:center;z-index:9999;padding:16px;}
+  .vmodal-bg.open{display:flex;}
+  .vmodal{background:#fff;border-radius:12px;padding:18px 20px;width:100%;max-width:380px;font-family:var(--font-ui);box-shadow:0 10px 30px rgba(0,0,0,.25);}
+  .vmodal h3{margin:0 0 4px;font-size:16px;}
+  .vmodal p{margin:0 0 12px;font-size:12.5px;color:#6b7568;}
+  .vmodal label{display:block;font-size:11.5px;font-weight:700;color:#6b7568;text-transform:uppercase;letter-spacing:.02em;margin:10px 0 4px;}
+  .vmodal input{width:100%;font-family:var(--font-ui);font-size:14px;padding:9px 10px;border:1px solid var(--hairline);border-radius:6px;}
+  .vmodal .vbtns{display:flex;gap:8px;justify-content:flex-end;margin-top:16px;}
   table.sig{width:100%;border-collapse:separate;border-spacing:0;margin-top:16px;table-layout:fixed;}
   table.sig th{font-family:var(--font-ui);text-align:left;background:var(--header-fill);padding:6px 8px;font-size:12px;border:1px solid var(--line);}
   table.sig td.sig-field{border:1px solid var(--line);padding:0;}
@@ -994,7 +1002,7 @@ function renderWeekTable(weekKey, weekNo){
     <tr><th>Audited by:</th><th>Verified by:</th></tr>
     <tr>
       <td class="sig-line">${escapeHtml(week.audited.name)}</td>
-      <td class="sig-line">${escapeHtml(week.verified.name)}</td>
+      <td class="sig-line">${escapeHtml(initialsOf(week.verified.name))}</td>
     </tr>
     <tr>
       <td class="sig-field"><div class="sig-field-inner"><span>Name:</span><input data-group="audited" data-field="name" type="text" value="${escapeAttr(week.audited.name)}" ${locked?'disabled':''}></div></td>
@@ -1153,7 +1161,7 @@ function renderSummary(){
     <tr><th>Audited by:</th><th>Verified by:</th></tr>
     <tr>
       <td class="sig-line">${escapeHtml(state.monthly.reviewed.name)}</td>
-      <td class="sig-line">${escapeHtml(state.monthly.verified.name)}</td>
+      <td class="sig-line">${escapeHtml(initialsOf(state.monthly.verified.name))}</td>
     </tr>
     <tr>
       <td class="sig-field"><div class="sig-field-inner"><span>Name:</span><input data-mgroup="reviewed" data-field="name" type="text" value="${escapeAttr(state.monthly.reviewed.name)}" ${locked?'disabled':''}></div></td>
@@ -1171,6 +1179,13 @@ function renderSummary(){
   `;
 }
 
+// "Siti Aminah binti Ali" -> "SAA". Single word / already initials ("SA") stay as typed.
+function initialsOf(name){
+  const n = (name||"").trim();
+  if(!n || !/\s/.test(n)) return n;
+  const skip = ["bin","binti","bte","bt","b","a/l","a/p","al","ap"];
+  return n.split(/\s+/).filter(w=>!skip.includes(w.toLowerCase())).map(w=>w.charAt(0).toUpperCase()).join("");
+}
 function escapeHtml(s){return (s||"").replace(/[&<>]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;"}[c]));}
 function escapeAttr(s){return (s||"").replace(/"/g,"&quot;");}
 
@@ -1290,7 +1305,7 @@ function wireSheetEvents(){
           if(td && table){
             const sigRow = table.rows[1]; // row0=header, row1=sig-line row
             const sigEl = sigRow ? sigRow.children[td.cellIndex] : null;
-            if(sigEl) sigEl.textContent = inp.value;
+            if(sigEl) sigEl.textContent = (td.cellIndex===1 ? initialsOf(inp.value) : inp.value);
           }
         }
         scheduleSave(activeTab);
@@ -1317,7 +1332,7 @@ function wireSheetEvents(){
           if(td && table){
             const sigRow = table.rows[1];
             const sigEl = sigRow ? sigRow.children[td.cellIndex] : null;
-            if(sigEl) sigEl.textContent = inp.value;
+            if(sigEl) sigEl.textContent = (td.cellIndex===1 ? initialsOf(inp.value) : inp.value);
           }
         }
         scheduleSave("monthly");
@@ -2213,21 +2228,59 @@ function doCancelReview(){
   obj.reviewing = false;
   renderApp();
 }
+function verifierMemo(){
+  try{ return JSON.parse(localStorage.getItem("hx3f34_last_verifier")||"{}"); }catch(e){ return {}; }
+}
+function rememberVerifier(name, position){
+  try{ localStorage.setItem("hx3f34_last_verifier", JSON.stringify({name:name, position:position})); }catch(e){}
+}
+function todayISO(){
+  const d = new Date();
+  return d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")+"-"+String(d.getDate()).padStart(2,"0");
+}
+// Small pop-up: Name + Position + Date in one go. Pre-filled with whoever
+// verified last on this device, so usually it's just one tap on "Verify".
 function doConfirmVerify(){
   const isMonthly = activeTab==="monthly";
   const obj = isMonthly ? state.monthly : state[activeTab];
-  let initial = obj.verified.name;
-  if(!initial){
-    const entered = window.prompt("You're reviewing data saved " + fmtDateTime(obj.savedAt) + ".\nEnter your initials to verify this record:", "");
-    if(entered===null) return; // cancelled — stay in review mode
-    initial = entered.trim();
-    if(!initial){ alert("Initials are required to verify."); return; }
-    obj.verified.name = initial.toUpperCase();
+  const memo = verifierMemo();
+  let bg = document.getElementById('verifyModalBg');
+  if(!bg){
+    bg = document.createElement('div');
+    bg.id = 'verifyModalBg';
+    bg.className = 'vmodal-bg';
+    bg.innerHTML = `<div class="vmodal">
+      <h3>Verify this record</h3>
+      <p id="vmInfo"></p>
+      <label>Name</label><input type="text" id="vmName" autocomplete="off">
+      <label>Position</label><input type="text" id="vmPos" autocomplete="off">
+      <label>Date</label><input type="date" id="vmDate">
+      <div class="vbtns">
+        <button type="button" class="action secondary" id="vmCancel">Cancel</button>
+        <button type="button" class="action verify" id="vmOk">Verify</button>
+      </div></div>`;
+    document.body.appendChild(bg);
   }
-  obj.verified.date = new Date().toISOString().slice(0,10);
-  obj.verifiedFlag = true;
-  obj.reviewing = false;
-  forceSave(activeTab);
+  document.getElementById('vmInfo').textContent = "Reviewing data saved " + fmtDateTime(obj.savedAt) + ".";
+  document.getElementById('vmName').value = obj.verified.name || memo.name || "";
+  document.getElementById('vmPos').value = obj.verified.position || memo.position || "";
+  document.getElementById('vmDate').value = obj.verified.date || todayISO();
+  bg.classList.add('open');
+  const close = ()=> bg.classList.remove('open');
+  document.getElementById('vmCancel').onclick = close; // stays in review mode
+  document.getElementById('vmOk').onclick = ()=>{
+    const name = document.getElementById('vmName').value.trim();
+    const position = document.getElementById('vmPos').value.trim();
+    const date = document.getElementById('vmDate').value || todayISO();
+    if(!name){ alert("Name is required to verify."); return; }
+    obj.verified = {name:name, position:position, date:date};
+    rememberVerifier(name, position);
+    obj.verifiedFlag = true;
+    obj.reviewing = false;
+    close();
+    forceSave(activeTab);
+  };
+  setTimeout(()=>{ const n = document.getElementById('vmName'); if(n && !n.value) n.focus(); }, 50);
 }
 function doDelete(){
   const tabLabel = TABS.find(t=>t.key===activeTab).label;
