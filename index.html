@@ -242,6 +242,12 @@
     font-family:var(--font-ui);font-size:12.5px;padding:8px;resize:vertical;
   }
 
+  .weekly-comments{border:1px solid var(--line);background:var(--input-fill);font-family:var(--font-ui);font-size:12.5px;padding:8px 10px;}
+  .wc-week{margin-bottom:8px;}
+  .wc-week:last-child{margin-bottom:0;}
+  .wc-title{font-weight:700;font-size:12px;color:var(--accent);margin-bottom:2px;}
+  .wc-text{white-space:pre-wrap;line-height:1.45;}
+  .wc-empty{color:#8a9288;font-style:italic;}
   table.sig{width:100%;border-collapse:separate;border-spacing:0;margin-top:16px;table-layout:fixed;}
   table.sig th{font-family:var(--font-ui);text-align:left;background:var(--header-fill);padding:6px 8px;font-size:12px;border:1px solid var(--line);}
   table.sig td.sig-field{border:1px solid var(--line);padding:0;}
@@ -1006,6 +1012,26 @@ function renderWeekTable(weekKey, weekNo){
   `;
 }
 
+// Gathers every "Comments by Auditor(s)" box (both the Outside and Internal
+// perimeter boxes) from Week 1-4 so the Monthly Summary can show them all.
+function weeklyCommentsList(){
+  return WEEK_KEYS.map((k,i)=>{
+    const w = state[k];
+    const text = [w.comments1, w.comments2].map(t=>(t||"").trim()).filter(Boolean).join("\n");
+    return { label:"Week "+(i+1), date:w.date||"", text:text };
+  });
+}
+// Plain-text version (used for the Google Sheet's Monthly Summary comments row).
+function monthlyCommentsText(){
+  const parts = weeklyCommentsList().map(w=>{
+    const head = w.label + (w.date ? " ("+w.date+")" : "");
+    return head + ":\n" + (w.text || "-");
+  });
+  const extra = (state.monthly.comments||"").trim();
+  if(extra) parts.push("Additional monthly comments:\n"+extra);
+  return parts.join("\n\n");
+}
+
 // ------------------------------------------------------- render summary --
 // Prints exactly like the original single form (one Findings 0/1/2 area,
 // no extra columns) — each item's mark is the average of that item's Week
@@ -1116,7 +1142,12 @@ function renderSummary(){
   </table>
 
   <div class="comments-label">Comments by Auditor(s):</div>
-  <textarea class="comments" data-field="mcomments" ${locked?'disabled':''}>${escapeHtml(state.monthly.comments)}</textarea>
+  <div class="weekly-comments">
+    ${weeklyCommentsList().map(w=>`<div class="wc-week"><div class="wc-title">${w.label}${w.date?` (${escapeHtml(w.date)})`:''}</div>${w.text?`<div class="wc-text">${escapeHtml(w.text)}</div>`:`<div class="wc-text wc-empty">No comments recorded.</div>`}</div>`).join("")}
+  </div>
+  <div class="note" style="margin:4px 0 0;">Weekly comments above are pulled automatically from Week 1\u20134 \u2014 edit them in each week's tab.</div>
+  <div class="comments-label">Additional monthly comments (optional):</div>
+  <textarea class="comments" data-field="mcomments" style="min-height:60px;" ${locked?'disabled':''}>${escapeHtml(state.monthly.comments)}</textarea>
 
   <table class="sig">
     <tr><th>Audited by:</th><th>Verified by:</th></tr>
@@ -1906,7 +1937,8 @@ function buildRecordPayload(key){
   };
   if(isMonthly){
     base.period = state.monthly.period;
-    base.comments = state.monthly.comments;
+    base.comments = monthlyCommentsText();
+    base.manualComments = state.monthly.comments || "";
     base.signLeftLabel = "Audited by:";
     base.signLeft = state.monthly.reviewed;
     base.signRightLabel = "Verified by:";
@@ -2011,7 +2043,7 @@ function recordPayloadToState(rec){
   const right = Object.assign({name:"",position:"",date:""}, rec.signRight||{});
   if(isMonthly){
     obj.period = rec.period || "";
-    obj.comments = rec.comments || "";
+    obj.comments = (rec.manualComments !== undefined) ? (rec.manualComments || "") : "";
     obj.reviewed = left;
     obj.verified = right;
   } else {
