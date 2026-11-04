@@ -351,11 +351,19 @@
   .trend-table th, .trend-table td{border:1px solid #ddd;padding:6px 8px;text-align:left;}
   .trend-table th{background:#e7e2d6;}
 
+  .trend-print-head{display:none;}
+  .trend-print-head .tph-title{font-size:16px;font-weight:700;margin-bottom:2px;}
+  .trend-print-head .tph-meta{font-size:12px;color:#444;margin-bottom:10px;}
   /* ---------- print ---------- */
   @media print{
     body{background:#fff;}
     .sectiontabs, .tabbar, .toolbar, .storage-banner, .verify-banner, .review-banner, #recordsSection, #gsheetSection, #editformSection, #trendSection{display:none !important;}
     #app{max-width:none;padding:0;}
+    body.printing-trend #trendSection{display:block !important;border:none;padding:0;box-shadow:none;}
+    body.printing-trend #trendBanner, body.printing-trend .trend-controls{display:none !important;}
+    body.printing-trend .trend-print-head{display:block !important;}
+    body.printing-trend .trend-table th{background:#e7e2d6 !important;-webkit-print-color-adjust:exact;print-color-adjust:exact;}
+    body.printing-trend .trend-table tr{page-break-inside:avoid;}
     .sheet{display:none !important;border:none;padding:0;}
     .sheet.print-target{display:block !important;}
     .sheet.print-all{display:block !important;page-break-after:always;}
@@ -465,11 +473,16 @@
 
   <div id="trendSection" class="panel">
     <div class="gsheet-status" id="trendBanner">📈 Score &amp; finding trend across all months synced to Google Sheet.</div>
-    <div class="btns" style="margin:10px 0;align-items:center;">
+    <div class="btns trend-controls" style="margin:10px 0;align-items:center;">
       <label style="font-size:13px;font-weight:600;">Year:
         <select id="trendYearSelect" style="margin-left:6px;padding:4px 8px;"><option value="">All years</option></select>
       </label>
       <button class="action secondary" id="refreshTrendBtn">Refresh trend</button>
+      <button class="action" id="printTrendBtn">🖨 Print trend</button>
+    </div>
+    <div class="trend-print-head">
+      <div class="tph-title">HEXA FOOD SDN BHD (HEXA 3) — GMP Audit Trend Analysis</div>
+      <div class="tph-meta" id="trendPrintMeta"></div>
     </div>
     <div id="trendContent"><p class="gnote">Click "Refresh trend" to load.</p></div>
   </div>
@@ -2204,6 +2217,21 @@ function buildTrendChartSvg(points){
     ${labels}
   </svg>`;
 }
+document.getElementById('printTrendBtn').addEventListener('click', ()=>{
+  const box = document.getElementById('trendContent');
+  if(!trendLoaded || !box.querySelector('.trend-table')){
+    alert("No trend data to print yet. Click Refresh trend first.");
+    return;
+  }
+  const yr = document.getElementById('trendYearSelect').value;
+  const d = new Date();
+  document.getElementById('trendPrintMeta').textContent =
+    "Year: " + (yr || "All years") + "  |  Printed: " + d.toLocaleDateString("en-GB");
+  document.body.classList.add('printing-trend');
+  const done = ()=>{ document.body.classList.remove('printing-trend'); window.removeEventListener('afterprint', done); };
+  window.addEventListener('afterprint', done);
+  window.print();
+});
 document.getElementById('refreshTrendBtn').addEventListener('click', ()=>{ loadTrend(); });
 document.getElementById('trendYearSelect').addEventListener('change', ()=>{ loadTrend(); });
 
