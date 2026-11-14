@@ -479,6 +479,7 @@
         <select id="trendYearSelect" style="margin-left:6px;padding:4px 8px;"></select>
       </label>
       <button class="action secondary" id="refreshTrendBtn">Refresh trend</button>
+      <label class="chk" style="margin-left:6px;"><input type="checkbox" id="trendCompareChk"> Compare with previous year</label>
       <button class="action" id="printTrendBtn">🖨 Print trend</button>
     </div>
     <div class="trend-print-head">
@@ -2164,7 +2165,16 @@ async function loadTrend(){
         return loadTrend();
       }
     }
-    renderTrendResult(parsed.periods||[], parsed.items||[], Number(yearSel.value) || new Date().getFullYear());
+    const curYear = Number(yearSel.value) || new Date().getFullYear();
+    let prevPeriods = null;
+    if(document.getElementById('trendCompareChk').checked){
+      try{
+        const r2 = await fetch(url + "?trend=1&year=" + (curYear-1));
+        const p2 = await r2.json();
+        prevPeriods = (p2.status === "ok") ? (p2.periods||[]) : [];
+      }catch(e2){ prevPeriods = []; }
+    }
+    renderTrendResult(parsed.periods||[], parsed.items||[], curYear, prevPeriods);
   }catch(e){
     box.innerHTML = "<p class=\"gnote\">Trend load failed (" + e.message + "). Check the Google Sheet is connected and at least one month has been synced.</p>";
   }
@@ -2175,37 +2185,70 @@ function periodToYM(label){
   const d = new Date("1 " + label);
   return isNaN(d.getTime()) ? null : {y:d.getFullYear(), m:d.getMonth()};
 }
-function renderTrendResult(periods, items, year){
-  const box = document.getElementById('trendContent');
-  // 12 fixed slots Jan-Dec of the chosen year; months with no saved Monthly Summary stay empty
+function buildSlots(periods, year){
   const slots = MONTH_ABBR.map((ab,m)=>({month:m, abbr:ab, total:null, rating:""}));
-  periods.forEach(p=>{
+  (periods||[]).forEach(p=>{
     const ym = periodToYM(p.period);
     if(!ym || ym.y!==year) return;
     if(p.total==="" || p.total==null) return;
     slots[ym.m].total = Number(p.total);
     slots[ym.m].rating = p.rating || "";
   });
+  return slots;
+}
+function renderTrendResult(periods, items, year, prevPeriods){
+  const box = document.getElementById('trendContent');
+  const comparing = Array.isArray(prevPeriods);
+  const slots = buildSlots(periods, year);
+  const prevSlots = comparing ? buildSlots(prevPeriods, year-1) : null;
   const recorded = slots.filter(x=>x.total!==null);
-  if(recorded.length===0){
-    box.innerHTML = "<p class=\"gnote\">No Monthly Summary has been saved &amp; synced for " + year + " yet, so there's no score trend to show. Fill and save a Monthly Summary, sync to Google Sheet, then refresh.</p>";
+  const prevRecorded = comparing ? prevSlots.filter(x=>x.total!==null) : [];
+  if(recorded.length===0 && prevRecorded.length===0){
+    box.innerHTML = "<p class=\"gnote\">No Monthly Summary has been saved &amp; synced for " + year + (comparing ? " or " + (year-1) : "") + " yet, so there's no score trend to show. Fill and save a Monthly Summary, sync to Google Sheet, then refresh.</p>";
     return;
   }
-  const avg = recorded.reduce((a,b)=>a+b.total,0)/recorded.length;
-  const chart = buildTrendChartSvg(slots, year);
-  const ratingRows = slots.map(x=>`<tr><td>${MONTH_FULL[x.month]} ${year}</td><td>${x.total===null?"\u2014":x.total}</td><td>${x.total===null?"<span style=\"color:#999;\">No data</span>":x.rating}</td></tr>`).join("");
+  const avgOf = arr => arr.length ? arr.reduce((a,b)=>a+b.total,0)/arr.length : null;
+  const avg = avgOf(recorded), prevAvg = avgOf(prevRecorded);
+  let summaryLine = "Months recorded: " + recorded.length + " / 12 \u00b7 Average score: " + (avg===null ? "\u2014" : avg.toFixed(1));
+  if(comparing){
+    summaryLine += " &nbsp;|&nbsp; " + (year-1) + ": " + prevRecorded.length + " / 12 months \u00b7 Average: " + (prevAvg===null ? "\u2014" : prevAvg.toFixed(1));
+    if(avg!==null && prevAvg!==null){
+      const d = avg - prevAvg;
+      summaryLine += " &nbsp;|&nbsp; Change in average: " + (d>=0?"+":"") + d.toFixed(1);
+    }
+  }
+  const chart = buildTrendChartSvg(slots, year, prevSlots);
+  const fmtDiff = (cur, prev)=>{
+    if(cur===null || prev===null) return "\u2014";
+    const d = cur - prev;
+    const color = d>0 ? "#3f5747" : (d<0 ? "#9c3b3b" : "#666");
+    return `<span style="color:${color};font-weight:700;">${d>0?"+":""}${d}</span>`;
+  };
+  const head = comparing
+    ? `<tr><th>Period</th><th>${year}</th><th>${year-1}</th><th>Change</th><th>Rating (${year})</th></tr>`
+    : `<tr><th>Period</th><th>Total Score</th><th>Rating</th></tr>`;
+  const ratingRows = slots.map((x,i)=>{
+    const cur = x.total===null ? "\u2014" : x.total;
+    const rate = x.total===null ? "<span style=\"color:#999;\">No data</span>" : x.rating;
+    if(!comparing) return `<tr><td>${MONTH_FULL[x.month]} ${year}</td><td>${cur}</td><td>${rate}</td></tr>`;
+    const pv = prevSlots[i].total;
+    return `<tr><td>${MONTH_FULL[x.month]}</td><td>${cur}</td><td>${pv===null?"\u2014":pv}</td><td>${fmtDiff(x.total,pv)}</td><td>${rate}</td></tr>`;
+  }).join("");
   const failItems = items.filter(it=>it.fails>0).slice(0,15);
   const zeroFailCount = items.filter(it=>it.total>0 && it.fails===0).length;
   const itemRows = failItems.length ? failItems.map(it=>
     `<tr><td>${it.criteria}</td><td style="text-align:center;">${it.fails}</td><td style="text-align:center;">${Math.round(it.failRate*100)}%</td></tr>`
   ).join("") : `<tr><td colspan="3">No items have been marked 0 in any synced Monthly Summary for ${year} (${zeroFailCount} items checked so far, all comply).</td></tr>`;
+  const noPrevNote = (comparing && prevRecorded.length===0)
+    ? `<div class="note" style="display:block;margin-bottom:8px;color:#7a4f16;">No data is available for ${year-1} in the Google Sheet yet, so the previous-year line cannot be displayed.</div>` : "";
 
   box.innerHTML = `
-    <h3 style="margin:16px 0 4px;">Total Score by month \u2014 ${year} (Jan\u2013Dec)</h3>
-    <div class="note" style="display:block;margin-bottom:8px;">Months recorded: ${recorded.length} / 12 \u00b7 Average score: ${avg.toFixed(1)}</div>
+    <h3 style="margin:16px 0 4px;">Total Score by month \u2014 ${year}${comparing ? " vs " + (year-1) : ""} (Jan\u2013Dec)</h3>
+    <div class="note" style="display:block;margin-bottom:8px;">${summaryLine}</div>
+    ${noPrevNote}
     ${chart}
     <table class="trend-table">
-      <tr><th>Period</th><th>Total Score</th><th>Rating</th></tr>
+      ${head}
       ${ratingRows}
     </table>
     <h3 style="margin:22px 0 8px;">Items most often marked 0 (fail) \u2014 ${year}</h3>
@@ -2215,15 +2258,15 @@ function renderTrendResult(periods, items, year){
     </table>
   `;
 }
-function buildTrendChartSvg(slots, year){
-  const W = 720, H = 280, padL = 40, padR = 20, padT = 22, padB = 34;
+function buildTrendChartSvg(slots, year, prevSlots){
+  const comparing = !!prevSlots;
+  const W = 720, H = 290, padL = 40, padR = 20, padT = comparing ? 36 : 22, padB = 34;
   const maxScore = 72; // form's rating scale (0-72)
   const plotW = W-padL-padR, plotH = H-padT-padB;
   const stepX = plotW/11; // 12 months -> 11 gaps
   const yOf = v => padT + (1 - v/maxScore) * plotH;
   const xOf = i => padL + stepX*i;
 
-  // rating bands behind the line: Poor 0-20, Good 21-40, Excellent 41-72
   const bands = [
     {from:0,  to:20,       fill:"#f3dcdc", label:"Poor"},
     {from:20, to:40,       fill:"#f6ecd2", label:"Good"},
@@ -2235,30 +2278,58 @@ function buildTrendChartSvg(slots, year){
     `<line x1="${padL}" y1="${yOf(v)}" x2="${W-padR}" y2="${yOf(v)}" stroke="#d6d6d6" stroke-width="0.8"></line>`+
     `<text x="${padL-6}" y="${yOf(v)+3}" font-size="9" text-anchor="end" fill="#888">${v}</text>`).join("");
 
-  // line is broken where a month has no data (gap), not joined across it
-  let path = "", pen = false;
-  slots.forEach((s,i)=>{
-    if(s.total===null){ pen = false; return; }
-    path += (pen ? " L" : " M") + xOf(i) + "," + yOf(s.total);
-    pen = true;
-  });
+  // path that breaks at months with no data
+  const pathOf = arr => {
+    let path = "", pen = false;
+    arr.forEach((s,i)=>{
+      if(s.total===null){ pen = false; return; }
+      path += (pen ? " L" : " M") + xOf(i) + "," + yOf(s.total);
+      pen = true;
+    });
+    return path.trim();
+  };
   const colorFor = t => t<=20 ? "#9c3b3b" : (t<=40 ? "#a3791f" : "#3f5747");
+  const PREV = "#c26a1b"; // last year's colour
+
+  // last year: dashed orange line, small hollow dots, drawn first so this year sits on top
+  let prevLayer = "";
+  if(comparing){
+    const pp = pathOf(prevSlots);
+    if(pp){
+      prevLayer = `<path d="${pp}" fill="none" stroke="${PREV}" stroke-width="1.8" stroke-dasharray="6 4" stroke-linejoin="round"></path>` +
+        prevSlots.map((s,i)=> s.total===null ? "" :
+          `<circle cx="${xOf(i)}" cy="${yOf(s.total)}" r="3" fill="#fff" stroke="${PREV}" stroke-width="1.6"></circle>`).join("");
+    }
+  }
+
+  const curPath = pathOf(slots);
   const dots = slots.map((s,i)=> s.total===null ? "" :
     `<circle cx="${xOf(i)}" cy="${yOf(s.total)}" r="4" fill="${colorFor(s.total)}" stroke="#fff" stroke-width="1.2"></circle>`+
     `<text x="${xOf(i)}" y="${yOf(s.total)-9}" font-size="10" font-weight="700" text-anchor="middle" fill="#1c2b22">${s.total}</text>`
   ).join("");
   const labels = slots.map((s,i)=>
-    `<text x="${xOf(i)}" y="${H-12}" font-size="10" text-anchor="middle" fill="${s.total===null?'#aaa':'#444'}">${s.abbr}</text>`
+    `<text x="${xOf(i)}" y="${H-12}" font-size="10" text-anchor="middle" fill="${(s.total===null && !(comparing && prevSlots[i].total!==null))?'#aaa':'#444'}">${s.abbr}</text>`
   ).join("");
-  const yearLbl = `<text x="${W/2}" y="${H-1}" font-size="9" text-anchor="middle" fill="#888">${year}</text>`;
+
+  const legend = comparing
+    ? `<g font-size="10" fill="#333">
+         <line x1="${padL}" y1="14" x2="${padL+26}" y2="14" stroke="#3f5747" stroke-width="2.4"></line>
+         <circle cx="${padL+13}" cy="14" r="3.5" fill="#3f5747"></circle>
+         <text x="${padL+32}" y="17.5">${year}</text>
+         <line x1="${padL+80}" y1="14" x2="${padL+106}" y2="14" stroke="${PREV}" stroke-width="1.8" stroke-dasharray="6 4"></line>
+         <circle cx="${padL+93}" cy="14" r="3" fill="#fff" stroke="${PREV}" stroke-width="1.6"></circle>
+         <text x="${padL+112}" y="17.5">${year-1}</text>
+       </g>`
+    : `<text x="${W/2}" y="${H-1}" font-size="9" text-anchor="middle" fill="#888">${year}</text>`;
 
   return `<svg viewBox="0 0 ${W} ${H}" style="width:100%;max-width:${W}px;height:auto;background:#fff;border:1px solid #e0e0e0;border-radius:6px;-webkit-print-color-adjust:exact;print-color-adjust:exact;">
     ${bands}
     ${gridY}
-    <path d="${path.trim()}" fill="none" stroke="#3f5747" stroke-width="2" stroke-linejoin="round"></path>
+    ${prevLayer}
+    <path d="${curPath}" fill="none" stroke="#3f5747" stroke-width="2.4" stroke-linejoin="round"></path>
     ${dots}
     ${labels}
-    ${yearLbl}
+    ${legend}
   </svg>`;
 }
 document.getElementById('printTrendBtn').addEventListener('click', ()=>{
@@ -2270,13 +2341,14 @@ document.getElementById('printTrendBtn').addEventListener('click', ()=>{
   const yr = document.getElementById('trendYearSelect').value;
   const d = new Date();
   document.getElementById('trendPrintMeta').textContent =
-    "Year: " + (yr || "All years") + "  |  Printed: " + d.toLocaleDateString("en-GB");
+    "Year: " + (yr || "All years") + (yr && document.getElementById('trendCompareChk').checked ? " (vs " + (Number(yr)-1) + ")" : "") + "  |  Printed: " + d.toLocaleDateString("en-GB");
   document.body.classList.add('printing-trend');
   const done = ()=>{ document.body.classList.remove('printing-trend'); window.removeEventListener('afterprint', done); };
   window.addEventListener('afterprint', done);
   window.print();
 });
 document.getElementById('refreshTrendBtn').addEventListener('click', ()=>{ loadTrend(); });
+document.getElementById('trendCompareChk').addEventListener('change', ()=>{ loadTrend(); });
 document.getElementById('trendYearSelect').addEventListener('change', ()=>{ loadTrend(); });
 
 // ---------------------------------------------------------------- doVerify etc -
